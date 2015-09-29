@@ -887,6 +887,18 @@ status_t Surface::lock(
     return err;
 }
 
+status_t Surface::lockWithHandle(ANativeWindow_Buffer* outBuffer,
+        buffer_handle_t* handle, ARect* inOutDirtyBounds)
+{
+    status_t err = lock(outBuffer, inOutDirtyBounds);
+
+    if (err == 0) {
+        *handle = mLockedBuffer->handle;
+    }
+    return err;
+}
+
+
 status_t Surface::unlockAndPost()
 {
     if (mLockedBuffer == 0) {
