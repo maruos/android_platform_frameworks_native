@@ -281,6 +281,9 @@ public:
     // detachNextBuffer, or attachBuffer call.
     status_t getAndFlushRemovedBuffers(std::vector<sp<GraphicBuffer>>* out);
 
+    virtual int lockWithHandle(ANativeWindow_Buffer* outBuffer,
+             buffer_handle_t* handle, ARect* inOutDirtyBounds);
+
 protected:
     enum { NUM_BUFFER_SLOTS = BufferQueueDefs::NUM_BUFFER_SLOTS };
     enum { DEFAULT_FORMAT = PIXEL_FORMAT_RGBA_8888 };
