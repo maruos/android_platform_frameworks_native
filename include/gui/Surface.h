@@ -174,6 +174,9 @@ public:
     virtual int lock(ANativeWindow_Buffer* outBuffer, ARect* inOutDirtyBounds);
     virtual int unlockAndPost();
 
+    virtual int lockWithHandle(ANativeWindow_Buffer* outBuffer,
+             buffer_handle_t* handle, ARect* inOutDirtyBounds);
+
 protected:
     enum { NUM_BUFFER_SLOTS = BufferQueue::NUM_BUFFER_SLOTS };
     enum { DEFAULT_FORMAT = PIXEL_FORMAT_RGBA_8888 };
