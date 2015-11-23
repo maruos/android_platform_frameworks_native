@@ -1283,6 +1283,19 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
         return -1;
     }
 
+    /*
+     * Maru: reserve bluetooth keyboards and mice for desktop
+     *
+     * TODO: add hook for dynamic switching
+     */
+    if (device->identifier.bus == BUS_BLUETOOTH
+            && (device->classes & (INPUT_DEVICE_CLASS_KEYBOARD | INPUT_DEVICE_CLASS_CURSOR))) {
+        ALOGD("Reserving (dropping) device for Maru Desktop: id=%d, path='%s', name='%s'",
+                deviceId, devicePath, device->identifier.name.string());
+        delete device;
+        return -1;
+    }
+
     // Determine whether the device is external or internal.
     if (isExternalDeviceLocked(device)) {
         device->classes |= INPUT_DEVICE_CLASS_EXTERNAL;
