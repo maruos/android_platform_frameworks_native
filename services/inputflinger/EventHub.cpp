@@ -1289,7 +1289,7 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
      * TODO: add hook for dynamic switching
      */
     if (device->identifier.bus == BUS_BLUETOOTH
-            && (device->classes & (INPUT_DEVICE_CLASS_KEYBOARD | INPUT_DEVICE_CLASS_CURSOR))) {
+            && (device->classes & (INPUT_DEVICE_CLASS_ALPHAKEY | INPUT_DEVICE_CLASS_CURSOR))) {
         ALOGD("Reserving (dropping) device for Maru Desktop: id=%d, path='%s', name='%s'",
                 deviceId, devicePath, device->identifier.name.string());
         delete device;
