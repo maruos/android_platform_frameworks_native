@@ -131,6 +131,13 @@ uint32_t getAbsAxisUsage(int32_t axis, uint32_t deviceClasses) {
         }
     }
 
+    // External stylus gets the pressure axis
+    if (deviceClasses & INPUT_DEVICE_CLASS_EXTERNAL_STYLUS) {
+        if (axis == ABS_PRESSURE) {
+            return INPUT_DEVICE_CLASS_EXTERNAL_STYLUS;
+        }
+    }
+
     // Joystick devices get the rest.
     return deviceClasses & INPUT_DEVICE_CLASS_JOYSTICK;
 }
@@ -431,10 +438,12 @@ bool EventHub::markSupportedKeyCodes(int32_t deviceId, size_t numCodes,
     return false;
 }
 
-status_t EventHub::mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode,
-        int32_t* outKeycode, uint32_t* outFlags) const {
+status_t EventHub::mapKey(int32_t deviceId,
+        int32_t scanCode, int32_t usageCode, int32_t metaState,
+        int32_t* outKeycode, int32_t* outMetaState, uint32_t* outFlags) const {
     AutoMutex _l(mLock);
     Device* device = getDeviceLocked(deviceId);
+    status_t status = NAME_NOT_FOUND;
 
     if (device) {
         // Check the key character map first.
@@ -442,22 +451,34 @@ status_t EventHub::mapKey(int32_t deviceId, int32_t scanCode, int32_t usageCode,
         if (kcm != NULL) {
             if (!kcm->mapKey(scanCode, usageCode, outKeycode)) {
                 *outFlags = 0;
-                return NO_ERROR;
+                status = NO_ERROR;
             }
         }
 
         // Check the key layout next.
-        if (device->keyMap.haveKeyLayout()) {
+        if (status != NO_ERROR && device->keyMap.haveKeyLayout()) {
             if (!device->keyMap.keyLayoutMap->mapKey(
                     scanCode, usageCode, outKeycode, outFlags)) {
-                return NO_ERROR;
+                status = NO_ERROR;
+            }
+        }
+
+        if (status == NO_ERROR) {
+            if (kcm != NULL) {
+                kcm->tryRemapKey(*outKeycode, metaState, outKeycode, outMetaState);
+            } else {
+                *outMetaState = metaState;
             }
         }
     }
 
-    *outKeycode = 0;
-    *outFlags = 0;
-    return NAME_NOT_FOUND;
+    if (status != NO_ERROR) {
+        *outKeycode = 0;
+        *outFlags = 0;
+        *outMetaState = metaState;
+    }
+
+    return status;
 }
 
 status_t EventHub::mapAxis(int32_t deviceId, int32_t scanCode, AxisInfo* outAxisInfo) const {
@@ -858,7 +879,6 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
                                     int(iev.time.tv_sec), int(iev.time.tv_usec));
                         }
 
-#ifdef HAVE_POSIX_CLOCKS
                         // Use the time specified in the event instead of the current time
                         // so that downstream code can get more accurate estimates of
                         // event dispatch latency from the time the event is enqueued onto
@@ -909,9 +929,6 @@ size_t EventHub::getEvents(int timeoutMillis, RawEvent* buffer, size_t bufferSiz
                                         event->when, time, now);
                             }
                         }
-#else
-                        event->when = now;
-#endif
                         event->deviceId = deviceId;
                         event->type = iev.type;
                         event->code = iev.code;
@@ -1189,6 +1206,16 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
             && test_bit(ABS_X, device->absBitmask)
             && test_bit(ABS_Y, device->absBitmask)) {
         device->classes |= INPUT_DEVICE_CLASS_TOUCH;
+    // Is this a BT stylus?
+    } else if ((test_bit(ABS_PRESSURE, device->absBitmask) ||
+                test_bit(BTN_TOUCH, device->keyBitmask))
+            && !test_bit(ABS_X, device->absBitmask)
+            && !test_bit(ABS_Y, device->absBitmask)) {
+        device->classes |= INPUT_DEVICE_CLASS_EXTERNAL_STYLUS;
+        // Keyboard will try to claim some of the buttons but we really want to reserve those so we
+        // can fuse it with the touch screen data, so just take them back. Note this means an
+        // external stylus cannot also be a keyboard device.
+        device->classes &= ~INPUT_DEVICE_CLASS_KEYBOARD;
     }
 
     // See if this device is a joystick.
@@ -1283,6 +1310,11 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
         return -1;
     }
 
+    // Determine whether the device has a mic.
+    if (deviceHasMicLocked(device)) {
+        device->classes |= INPUT_DEVICE_CLASS_MIC;
+    }
+
     /*
      * Maru: reserve bluetooth keyboards and mice for desktop
      *
@@ -1310,7 +1342,10 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
     // Register with epoll.
     struct epoll_event eventItem;
     memset(&eventItem, 0, sizeof(eventItem));
-    eventItem.events = mUsingEpollWakeup ? EPOLLIN : EPOLLIN | EPOLLWAKEUP;
+    eventItem.events = EPOLLIN;
+    if (mUsingEpollWakeup) {
+        eventItem.events |= EPOLLWAKEUP;
+    }
     eventItem.data.u32 = deviceId;
     if (epoll_ctl(mEpollFd, EPOLL_CTL_ADD, fd, &eventItem)) {
         ALOGE("Could not add device fd to epoll instance.  errno=%d", errno);
@@ -1429,6 +1464,16 @@ bool EventHub::isExternalDeviceLocked(Device* device) {
     return device->identifier.bus == BUS_USB || device->identifier.bus == BUS_BLUETOOTH;
 }
 
+bool EventHub::deviceHasMicLocked(Device* device) {
+    if (device->configuration) {
+        bool value;
+        if (device->configuration->tryGetProperty(String8("audio.mic"), value)) {
+            return value;
+        }
+    }
+    return false;
+}
+
 int32_t EventHub::getNextControllerNumberLocked(Device* device) {
     if (mControllerNumbers.isFull()) {
         ALOGI("Maximum number of controllers reached, assigning controller number 0 to device %s",
@@ -1456,7 +1501,7 @@ void EventHub::setLedForController(Device* device) {
 }
 
 bool EventHub::hasKeycodeLocked(Device* device, int keycode) const {
-    if (!device->keyMap.haveKeyLayout() || !device->keyBitmask) {
+    if (!device->keyMap.haveKeyLayout()) {
         return false;
     }
     
@@ -1474,7 +1519,7 @@ bool EventHub::hasKeycodeLocked(Device* device, int keycode) const {
 }
 
 status_t EventHub::mapLed(Device* device, int32_t led, int32_t* outScanCode) const {
-    if (!device->keyMap.haveKeyLayout() || !device->ledBitmask) {
+    if (!device->keyMap.haveKeyLayout()) {
         return NAME_NOT_FOUND;
     }
 

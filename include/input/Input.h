@@ -28,6 +28,7 @@
 #include <utils/String8.h>
 #include <utils/Timers.h>
 #include <utils/Vector.h>
+#include <stdint.h>
 
 /*
  * Additional private constants not defined in ndk/ui/input.h.
@@ -111,6 +112,11 @@ enum {
 #define MAX_POINTERS 16
 
 /*
+ * Maximum number of samples supported per motion event.
+ */
+#define MAX_SAMPLES UINT16_MAX
+
+/*
  * Maximum pointer id value supported in a motion event.
  * Smallest pointer id is 0.
  * (This is limited by our use of BitSet32 to track pointer assignments.)
@@ -149,9 +155,21 @@ enum {
      * NOTE: If you want a flag to be able to set in a keylayout file, then you must add it to
      * InputEventLabels.h as well. */
 
+    // Indicates that the event should wake the device.
     POLICY_FLAG_WAKE = 0x00000001,
+
+    // Indicates that the key is virtual, such as a capacitive button, and should
+    // generate haptic feedback.  Virtual keys may be suppressed for some time
+    // after a recent touch to prevent accidental activation of virtual keys adjacent
+    // to the touch screen during an edge swipe.
     POLICY_FLAG_VIRTUAL = 0x00000002,
+
+    // Indicates that the key is the special function modifier.
     POLICY_FLAG_FUNCTION = 0x00000004,
+
+    // Indicates that the key represents a special gesture that has been detected by
+    // the touch firmware or driver.  Causes touch events from the same device to be canceled.
+    POLICY_FLAG_GESTURE = 0x00000008,
 
     POLICY_FLAG_RAW_MASK = 0x0000ffff,
 
@@ -367,6 +385,12 @@ public:
 
     inline int32_t getButtonState() const { return mButtonState; }
 
+    inline int32_t setButtonState(int32_t buttonState) { mButtonState = buttonState; }
+
+    inline int32_t getActionButton() const { return mActionButton; }
+
+    inline void setActionButton(int32_t button) { mActionButton = button; }
+
     inline float getXOffset() const { return mXOffset; }
 
     inline float getYOffset() const { return mYOffset; }
@@ -520,6 +544,7 @@ public:
             int32_t deviceId,
             int32_t source,
             int32_t action,
+            int32_t actionButton,
             int32_t flags,
             int32_t edgeFlags,
             int32_t metaState,
@@ -572,6 +597,7 @@ public:
 
 protected:
     int32_t mAction;
+    int32_t mActionButton;
     int32_t mFlags;
     int32_t mEdgeFlags;
     int32_t mMetaState;
