@@ -51,6 +51,10 @@ static const nsecs_t RESAMPLE_LATENCY = 5 * NANOS_PER_MS;
 // Minimum time difference between consecutive samples before attempting to resample.
 static const nsecs_t RESAMPLE_MIN_DELTA = 2 * NANOS_PER_MS;
 
+// Maximum time difference between consecutive samples before attempting to resample
+// by extrapolation.
+static const nsecs_t RESAMPLE_MAX_DELTA = 20 * NANOS_PER_MS;
+
 // Maximum time to predict forward from the last known state, to avoid predicting too
 // far into the future.  This time is further bounded by 50% of the last time delta.
 static const nsecs_t RESAMPLE_MAX_PREDICTION = 8 * NANOS_PER_MS;
@@ -283,6 +287,7 @@ status_t InputPublisher::publishMotionEvent(
         int32_t deviceId,
         int32_t source,
         int32_t action,
+        int32_t actionButton,
         int32_t flags,
         int32_t edgeFlags,
         int32_t metaState,
@@ -298,12 +303,12 @@ status_t InputPublisher::publishMotionEvent(
         const PointerCoords* pointerCoords) {
 #if DEBUG_TRANSPORT_ACTIONS
     ALOGD("channel '%s' publisher ~ publishMotionEvent: seq=%u, deviceId=%d, source=0x%x, "
-            "action=0x%x, flags=0x%x, edgeFlags=0x%x, metaState=0x%x, buttonState=0x%x, "
-            "xOffset=%f, yOffset=%f, "
+            "action=0x%x, actionButton=0x%08x, flags=0x%x, edgeFlags=0x%x, "
+            "metaState=0x%x, buttonState=0x%x, xOffset=%f, yOffset=%f, "
             "xPrecision=%f, yPrecision=%f, downTime=%lld, eventTime=%lld, "
             "pointerCount=%" PRIu32,
             mChannel->getName().string(), seq,
-            deviceId, source, action, flags, edgeFlags, metaState, buttonState,
+            deviceId, source, action, actionButton, flags, edgeFlags, metaState, buttonState,
             xOffset, yOffset, xPrecision, yPrecision, downTime, eventTime, pointerCount);
 #endif
 
@@ -324,6 +329,7 @@ status_t InputPublisher::publishMotionEvent(
     msg.body.motion.deviceId = deviceId;
     msg.body.motion.source = source;
     msg.body.motion.action = action;
+    msg.body.motion.actionButton = actionButton;
     msg.body.motion.flags = flags;
     msg.body.motion.edgeFlags = edgeFlags;
     msg.body.motion.metaState = metaState;
@@ -722,7 +728,7 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
         nsecs_t delta = future.eventTime - current->eventTime;
         if (delta < RESAMPLE_MIN_DELTA) {
 #if DEBUG_RESAMPLING
-            ALOGD("Not resampled, delta time is %lld ns.", delta);
+            ALOGD("Not resampled, delta time is too small: %lld ns.", delta);
 #endif
             return;
         }
@@ -734,7 +740,12 @@ void InputConsumer::resampleTouchState(nsecs_t sampleTime, MotionEvent* event,
         nsecs_t delta = current->eventTime - other->eventTime;
         if (delta < RESAMPLE_MIN_DELTA) {
 #if DEBUG_RESAMPLING
-            ALOGD("Not resampled, delta time is %lld ns.", delta);
+            ALOGD("Not resampled, delta time is too small: %lld ns.", delta);
+#endif
+            return;
+        } else if (delta > RESAMPLE_MAX_DELTA) {
+#if DEBUG_RESAMPLING
+            ALOGD("Not resampled, delta time is too large: %lld ns.", delta);
 #endif
             return;
         }
@@ -907,6 +918,7 @@ void InputConsumer::initializeMotionEvent(MotionEvent* event, const InputMessage
             msg->body.motion.deviceId,
             msg->body.motion.source,
             msg->body.motion.action,
+            msg->body.motion.actionButton,
             msg->body.motion.flags,
             msg->body.motion.edgeFlags,
             msg->body.motion.metaState,

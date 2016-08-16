@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/sendfile.h>
 #include <time.h>
 #include <zlib.h>
@@ -34,6 +35,7 @@
 #include <cutils/properties.h>
 
 #include <utils/String8.h>
+#include <utils/Timers.h>
 #include <utils/Trace.h>
 
 using namespace android;
@@ -135,6 +137,9 @@ static const TracingCategory k_categories[] = {
         { REQ,      "/sys/kernel/debug/tracing/events/vmscan/mm_vmscan_kswapd_wake/enable" },
         { REQ,      "/sys/kernel/debug/tracing/events/vmscan/mm_vmscan_kswapd_sleep/enable" },
     } },
+    { "regulators",  "Voltage and Current Regulators", 0, {
+        { REQ,      "/sys/kernel/debug/tracing/events/regulator/enable" },
+    } },
 };
 
 /* Command line options */
@@ -190,6 +195,9 @@ static const char* k_tracingOnPath =
 
 static const char* k_tracePath =
     "/sys/kernel/debug/tracing/trace";
+
+static const char* k_traceMarkerPath =
+    "/sys/kernel/debug/tracing/trace_marker";
 
 // Check whether a file exists.
 static bool fileExists(const char* filename) {
@@ -251,6 +259,32 @@ static bool writeStr(const char* filename, const char* str)
 static bool appendStr(const char* filename, const char* str)
 {
     return _writeStr(filename, str, O_APPEND|O_WRONLY);
+}
+
+static void writeClockSyncMarker()
+{
+  char buffer[128];
+  int len = 0;
+  int fd = open(k_traceMarkerPath, O_WRONLY);
+  if (fd == -1) {
+      fprintf(stderr, "error opening %s: %s (%d)\n", k_traceMarkerPath,
+              strerror(errno), errno);
+      return;
+  }
+  float now_in_seconds = systemTime(CLOCK_MONOTONIC) / 1000000000.0f;
+
+  len = snprintf(buffer, 128, "trace_event_clock_sync: parent_ts=%f\n", now_in_seconds);
+  if (write(fd, buffer, len) != len) {
+      fprintf(stderr, "error writing clock sync marker %s (%d)\n", strerror(errno), errno);
+  }
+
+  int64_t realtime_in_ms = systemTime(CLOCK_REALTIME) / 1000000;
+  len = snprintf(buffer, 128, "trace_event_clock_sync: realtime_ts=%" PRId64 "\n", realtime_in_ms);
+  if (write(fd, buffer, len) != len) {
+      fprintf(stderr, "error writing clock sync marker %s (%d)\n", strerror(errno), errno);
+  }
+
+  close(fd);
 }
 
 // Enable or disable a kernel option by writing a "1" or a "0" into a /sys
@@ -648,7 +682,7 @@ static void dumpTrace()
         uint8_t *in, *out;
         int result, flush;
 
-        bzero(&zs, sizeof(zs));
+        memset(&zs, 0, sizeof(zs));
         result = deflateInit(&zs, Z_DEFAULT_COMPRESSION);
         if (result != Z_OK) {
             fprintf(stderr, "error initializing zlib: %d\n", result);
@@ -883,7 +917,7 @@ int main(int argc, char **argv)
                     g_traceOverwrite = true;
                 } else if (!strcmp(long_options[option_index].name, "async_stop")) {
                     async = true;
-                    traceStop = false;
+                    traceStart = false;
                 } else if (!strcmp(long_options[option_index].name, "async_dump")) {
                     async = true;
                     traceStart = false;
@@ -923,6 +957,7 @@ int main(int argc, char **argv)
         // another.
         ok = clearTrace();
 
+        writeClockSyncMarker();
         if (ok && !async) {
             // Sleep to allow the trace to be captured.
             struct timespec timeLeft;
