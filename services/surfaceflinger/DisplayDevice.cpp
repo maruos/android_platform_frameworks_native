@@ -183,10 +183,6 @@ DisplayDevice::DisplayDevice(
             break;
     }
 
-    // we store the value as orientation:
-    // 90 -> 1, 180 -> 2, 270 -> 3
-    mHardwareRotation = property_get_int32("ro.sf.hwrotation", 0) / 90;
-
     // initialize the display orientation transform.
     setProjection(DisplayState::eOrientationDefault, mViewport, mFrame);
 
@@ -487,14 +483,6 @@ status_t DisplayDevice::orientationToTransfrom(
         int orientation, int w, int h, Transform* tr)
 {
     uint32_t flags = 0;
-
-    if (mHardwareRotation && mType == DisplayType::DISPLAY_PRIMARY) {
-        // Rotate such that accounting for hardware rotation puts the
-        // buffer's rotation at 0 relative to the user.
-        orientation += (4 - mHardwareRotation);
-        orientation %= 4;
-    }
-
     switch (orientation) {
     case DisplayState::eOrientationDefault:
         flags = Transform::ROT_0;
@@ -550,11 +538,7 @@ void DisplayDevice::setProjection(int orientation,
     if (!frame.isValid()) {
         // the destination frame can be invalid if it has never been set,
         // in that case we assume the whole display frame.
-        if (mHardwareRotation & DisplayState::eOrientationSwapMask) {
-            frame = Rect(h, w);
-        } else {
-            frame = Rect(w, h);
-        }
+        frame = Rect(w, h);
     }
 
     if (viewport.isEmpty()) {
@@ -589,6 +573,15 @@ void DisplayDevice::setProjection(int orientation,
     float dst_y = frame.top;
     TL.set(-src_x, -src_y);
     TP.set(dst_x, dst_y);
+
+    // need to take care of HW rotation for mGlobalTransform
+    // for case if the panel is not installed align with device orientation
+    if (mType == DisplayType::DISPLAY_PRIMARY) {
+        int hw_orient = mFlinger->getHwOrientation();
+        DisplayDevice::orientationToTransfrom(
+                (orientation + hw_orient) % (DisplayState::eOrientation270 + 1),
+                w, h, &R);
+    }
 
     // The viewport and frame are both in the logical orientation.
     // Apply the logical translation, scale to physical size, apply the

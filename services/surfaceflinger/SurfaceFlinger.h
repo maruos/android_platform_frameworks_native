@@ -629,9 +629,6 @@ private:
     void updateVrFlinger();
 #endif
 
-    // Panel hardware rotation
-    int32_t mHardwareRotation;
-
     /* ------------------------------------------------------------------------
      * Attributes
      */
@@ -821,6 +818,12 @@ private:
 
     float mSaturation = 1.0f;
     bool mForceNativeColorMode = false;
+
+public:
+    int getHwOrientation() { return mHwOrientation; }
+private:
+    // for phyical panel orientation info
+    int mHwOrientation;
 };
 }; // namespace android
 
