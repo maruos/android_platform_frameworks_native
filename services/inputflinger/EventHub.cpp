@@ -32,7 +32,7 @@
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
-
+#include <sys/types.h>
 #define LOG_TAG "EventHub"
 
 // #define LOG_NDEBUG 0
@@ -1112,6 +1112,47 @@ status_t EventHub::unregisterDeviceFromEpollLocked(Device* device) {
     return OK;
 }
 
+pid_t proc_find(const char* name){
+    DIR* dir;
+    struct dirent* ent;
+    char buf[512];
+
+    long  pid;
+    char pname[100] = {0,};
+    char state;
+    FILE *fp=NULL;
+
+    if (!(dir = opendir("/proc"))) {
+        return -1;
+    }
+
+    while((ent = readdir(dir)) != NULL) {
+        long lpid = atol(ent->d_name);
+        if(lpid < 0)
+            continue;
+        snprintf(buf, sizeof(buf), "/proc/%ld/stat", lpid);
+        fp = fopen(buf, "r");
+
+        if (fp) {
+            if ( (fscanf(fp, "%ld (%[^)]) %c", &pid, pname, &state)) != 3 ){
+                fclose(fp);
+                closedir(dir);
+                return -1;
+            }
+            if (!strcmp(pname, name)) {
+                fclose(fp);
+                closedir(dir);
+                return (pid_t)lpid;
+            }
+            fclose(fp);
+        }
+    }
+
+
+closedir(dir);
+return -1;
+}
+    
 status_t EventHub::openDeviceLocked(const char *devicePath) {
     char buffer[80];
 
@@ -1363,13 +1404,37 @@ status_t EventHub::openDeviceLocked(const char *devicePath) {
      *
      * TODO: add hook for dynamic switching
      */
-    if (device->identifier.bus == BUS_BLUETOOTH
-            && (device->classes & (INPUT_DEVICE_CLASS_ALPHAKEY | INPUT_DEVICE_CLASS_CURSOR))) {
-        ALOGD("Reserving (dropping) device for Maru Desktop: id=%d, path='%s', name='%s'",
-                deviceId, devicePath, device->identifier.name.string());
-        delete device;
-        return -1;
-    }
+     pid_t pid = -1;
+     if (device->identifier.bus == BUS_BLUETOOTH
+        	    && (device->classes & (INPUT_DEVICE_CLASS_ALPHAKEY | INPUT_DEVICE_CLASS_CURSOR))) 
+      {
+                pid = proc_find("mclient");
+                if (pid != -1)
+                {
+
+	  	      ALOGD("Reserving (dropping) device for Maru Desktop: id=%d, path='%s', name='%s'",
+        		        deviceId, devicePath, device->identifier.name.string());
+	        	delete device;
+	        	return -1;
+                }
+     }
+     if (device->identifier.bus == BUS_USB
+        	    && (device->classes & (INPUT_DEVICE_CLASS_KEYBOARD | INPUT_DEVICE_CLASS_CURSOR))) 
+     {
+                pid = proc_find("mclient");
+                if (pid != -1)
+                {
+
+                      ALOGD("Reserving (dropping) device for Maru Desktop: id=%d, path='%s', name='%s'",
+                                deviceId, devicePath, device->identifier.name.string());
+                        delete device;
+                        return -1;
+                }
+     }
+
+
+
+
 
     // Determine whether the device is external or internal.
     if (isExternalDeviceLocked(device)) {
