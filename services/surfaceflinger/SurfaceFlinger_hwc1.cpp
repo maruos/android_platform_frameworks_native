@@ -88,7 +88,7 @@
 #include <configstore/Utils.h>
 
 #define DISPLAY_COUNT       1
-
+#define PROPERTY_MARUOS_DESKTOP_INTERACTIVE "sys.maruos.desktop.interactive"
 /*
  * DEBUG_SCREENSHOTS: set to true to check that screenshots are not all
  * black pixels.
@@ -1365,6 +1365,7 @@ void SurfaceFlinger::rebuildLayerStacks() {
         mVisibleRegionsDirty = false;
         invalidateHwcGeometry();
 
+        bool isDesktopInteractive = property_get_bool(PROPERTY_MARUOS_DESKTOP_INTERACTIVE, false);
         for (size_t dpy=0 ; dpy<mDisplays.size() ; dpy++) {
             Region opaqueRegion;
             Region dirtyRegion;
@@ -1376,7 +1377,10 @@ void SurfaceFlinger::rebuildLayerStacks() {
                 computeVisibleRegions(hw, dirtyRegion, opaqueRegion);
 
                 mDrawingState.traverseInZOrder([&](Layer* layer) {
-                    if (layer->getLayerStack() == hw->getLayerStack()) {
+                    // If linux is enable now, just omit cursor window layer.
+                    bool isCursorWindow = layer->isPotentialCursor();
+                    bool shouldShowLayer = !(isDesktopInteractive && isCursorWindow);
+                    if (shouldShowLayer && layer->getLayerStack() == hw->getLayerStack()) {
                         Region drawRegion(tr.transform(
                                 layer->visibleNonTransparentRegion));
                         drawRegion.andSelf(bounds);
